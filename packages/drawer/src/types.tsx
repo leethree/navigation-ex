@@ -207,3 +207,20 @@ export type DrawerDescriptor = Descriptor<
 export type DrawerDescriptorMap = {
   [key: string]: DrawerDescriptor;
 };
+
+export type DrawerInterpolatorProps = {
+  align: Animated.Node<1 | -1>;
+  progress: Animated.Node<number>;
+  layouts: {
+    drawer: { width: Animated.Node<number> };
+  };
+};
+export type DrawerInterpolatedStyle = {
+  drawerStyle?: any;
+  contentStyle?: any;
+  overlayStyle?: any;
+};
+
+export type DrawerStyleInterpolator = (
+  props: DrawerInterpolatorProps
+) => DrawerInterpolatedStyle;

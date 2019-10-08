@@ -15,6 +15,8 @@ import {
   State,
 } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
+import memoize from '../utils/memoize';
+import { DrawerStyleInterpolator } from '../types';
 
 const {
   Clock,
@@ -23,7 +25,6 @@ const {
   clockRunning,
   startClock,
   stopClock,
-  interpolate,
   spring,
   abs,
   add,
@@ -91,6 +92,7 @@ type Props = {
   sceneContainerStyle?: StyleProp<ViewStyle>;
   renderDrawerContent: Renderer;
   renderSceneContent: Renderer;
+  styleInterpolator: DrawerStyleInterpolator;
   gestureHandlerProps?: React.ComponentProps<typeof PanGestureHandler>;
 };
 
@@ -136,7 +138,7 @@ export default class DrawerView extends React.PureComponent<Props> {
     }
 
     if (prevProps.drawerPosition !== drawerPosition) {
-      this.drawerPosition.setValue(
+      this.drawerAlign.setValue(
         drawerPosition === 'right' ? DIRECTION_RIGHT : DIRECTION_LEFT
       );
     }
@@ -183,7 +185,7 @@ export default class DrawerView extends React.PureComponent<Props> {
   private containerWidth = new Value<number>(0);
   private drawerWidth = new Value<number>(0);
   private drawerOpacity = new Value<number>(0);
-  private drawerPosition = new Value<number>(
+  private drawerAlign = new Value<1 | -1>(
     this.props.drawerPosition === 'right' ? DIRECTION_RIGHT : DIRECTION_LEFT
   );
 
@@ -215,7 +217,7 @@ export default class DrawerView extends React.PureComponent<Props> {
   private touchDistanceFromDrawer = cond(
     this.isDrawerTypeFront,
     cond(
-      eq(this.drawerPosition, DIRECTION_LEFT),
+      eq(this.drawerAlign, DIRECTION_LEFT),
       max(
         // Distance of touch start from left screen edge - Drawer width
         sub(sub(this.touchX, this.gestureX), this.drawerWidth),
@@ -267,7 +269,7 @@ export default class DrawerView extends React.PureComponent<Props> {
       cond(clockRunning(this.clock), NOOP, [
         // Animation wasn't running before
         // Set the initial values and start the clock
-        set(toValue, multiply(isOpen, this.drawerWidth, this.drawerPosition)),
+        set(toValue, multiply(isOpen, this.drawerWidth, this.drawerAlign)),
         set(frameTime, 0),
         set(state.time, 0),
         set(state.finished, FALSE),
@@ -388,7 +390,7 @@ export default class DrawerView extends React.PureComponent<Props> {
                 greaterThan(abs(this.gestureX), this.swipeDistanceThreshold)
               ),
               cond(
-                eq(this.drawerPosition, DIRECTION_LEFT),
+                eq(this.drawerAlign, DIRECTION_LEFT),
                 // If swiped to right, open the drawer, otherwise close it
                 greaterThan(
                   cond(eq(this.velocityX, 0), this.gestureX, this.velocityX),
@@ -410,7 +412,7 @@ export default class DrawerView extends React.PureComponent<Props> {
   ]);
 
   private translateX = cond(
-    eq(this.drawerPosition, DIRECTION_RIGHT),
+    eq(this.drawerAlign, DIRECTION_RIGHT),
     min(max(multiply(this.drawerWidth, -1), this.dragX), 0),
     max(min(this.drawerWidth, this.dragX), 0)
   );
@@ -477,31 +479,50 @@ export default class DrawerView extends React.PureComponent<Props> {
     }
   };
 
+  private getInterpolatedStyle = memoize(
+    (
+      styleInterpolator: DrawerStyleInterpolator,
+      progress: Animated.Node<number>,
+      align: Animated.Node<1 | -1>,
+      drawerWidth: Animated.Node<number>
+    ) =>
+      styleInterpolator({
+        progress,
+        align,
+        layouts: {
+          drawer: { width: drawerWidth },
+        },
+      })
+  );
+
   render() {
     const {
       open,
       locked,
       drawerPosition,
-      drawerType,
       swipeEdgeWidth,
       sceneContainerStyle,
-      drawerStyle,
-      overlayStyle,
+      drawerStyle: customDrawerStyle,
+      overlayStyle: customOverlayStyle,
       onGestureRef,
       renderDrawerContent,
       renderSceneContent,
+      styleInterpolator,
       gestureHandlerProps,
     } = this.props;
 
-    const right = drawerPosition === 'right';
+    const {
+      drawerStyle,
+      contentStyle,
+      overlayStyle,
+    } = this.getInterpolatedStyle(
+      styleInterpolator,
+      this.progress,
+      this.drawerAlign,
+      this.drawerWidth
+    );
 
-    const contentTranslateX = drawerType === 'front' ? 0 : this.translateX;
-    const drawerTranslateX =
-      drawerType === 'back'
-        ? I18nManager.isRTL
-          ? multiply(this.drawerWidth, DIRECTION_RIGHT)
-          : this.drawerWidth
-        : this.translateX;
+    const right = drawerPosition === 'right';
 
     const offset = I18nManager.isRTL ? '100%' : multiply(this.drawerWidth, -1);
 
@@ -529,13 +550,7 @@ export default class DrawerView extends React.PureComponent<Props> {
           style={styles.main}
         >
           <Animated.View
-            style={[
-              styles.content,
-              {
-                transform: [{ translateX: contentTranslateX }],
-              },
-              sceneContainerStyle as any,
-            ]}
+            style={[styles.content, contentStyle, sceneContainerStyle as any]}
           >
             {renderSceneContent({ progress: this.progress })}
             <TapGestureHandler onHandlerStateChange={this.handleTapStateChange}>
@@ -543,10 +558,6 @@ export default class DrawerView extends React.PureComponent<Props> {
                 style={[
                   styles.overlay,
                   {
-                    opacity: interpolate(this.progress, {
-                      inputRange: [PROGRESS_EPSILON, 1],
-                      outputRange: [0, 1],
-                    }),
                     // We don't want the user to be able to press through the overlay when drawer is open
                     // One approach is to adjust the pointerEvents based on the progress
                     // But we can also send the overlay behind the screen, which works, and is much less code
@@ -557,6 +568,7 @@ export default class DrawerView extends React.PureComponent<Props> {
                     ),
                   },
                   overlayStyle,
+                  customOverlayStyle,
                 ]}
               />
             </TapGestureHandler>
@@ -578,12 +590,9 @@ export default class DrawerView extends React.PureComponent<Props> {
             style={[
               styles.container,
               right ? { right: offset } : { left: offset },
-              {
-                transform: [{ translateX: drawerTranslateX }],
-                opacity: this.drawerOpacity,
-                zIndex: drawerType === 'back' ? -1 : 0,
-              },
-              drawerStyle as any,
+              { opacity: this.drawerOpacity },
+              drawerStyle,
+              customDrawerStyle,
             ]}
           >
             {renderDrawerContent({ progress: this.progress })}
