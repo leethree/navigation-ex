@@ -101,15 +101,15 @@ export function forFade({
 }: StackHeaderInterpolationProps): StackHeaderInterpolatedStyle {
   const progress = add(current.progress, next ? next.progress : 0);
   const opacity = interpolate(progress, {
-    inputRange: [0, 1, 1.9999, 2],
-    outputRange: [0, 1, 1, 0],
+    inputRange: [0, 1, 2],
+    outputRange: [0, 1, 0],
   });
 
   return {
     leftButtonStyle: { opacity },
     rightButtonStyle: { opacity },
     titleStyle: { opacity },
-    backgroundStyle: { opacity },
+    backgroundStyle: { opacity: current.progress },
   };
 }
 
